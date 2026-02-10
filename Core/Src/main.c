@@ -1,10 +1,8 @@
 #include "stm32f4xx.h"
 
-// --- ФУНКЦІЇ UART (ПИСАТИ І ЧИТАТИ) ---
-
 void UART_SendChar(char c) {
-    // Чекаємо, поки буфер передачі (TXE) стане пустим
-    while (!(USART2->SR & (1 << 7))); // TXE bit is 7
+    // Wait for TXE (Transmit Data Register Empty)
+    while (!(USART2->SR & (1 << 7))); 
     USART2->DR = c;
 }
 
@@ -13,53 +11,45 @@ void UART_SendString(char* str) {
 }
 
 int main(void) {
-    // --- 1. НАЛАШТУВАННЯ (SETUP) ---
+    // --- Hardware Configuration ---
 
-    // Вмикаємо тактування GPIOA (порт ніжок) і USART2 (порт зв'язку)
-    RCC->AHB1ENR |= (1 << 0);  // GPIOA EN
-    RCC->APB1ENR |= (1 << 17); // USART2 EN
+    // 1. Enable Clocks: GPIOA (AHB1) and USART2 (APB1)
+    RCC->AHB1ENR |= (1 << 0);
+    RCC->APB1ENR |= (1 << 17);
 
-    // Налаштовуємо PA2 (TX) і PA3 (RX) на режим "Alternate Function" (10)
-    // PA2: біти 4,5 -> ставимо 10
-    GPIOA->MODER &= ~(3U << (2 * 2));
-    GPIOA->MODER |=  (2U << (2 * 2));
-    // PA3: біти 6,7 -> ставимо 10
-    GPIOA->MODER &= ~(3U << (3 * 2));
-    GPIOA->MODER |=  (2U << (3 * 2));
+    // 2. Configure PA2 (TX) and PA3 (RX) for Alternate Function
+    GPIOA->MODER  &= ~((3U << 4) | (3U << 6));  // Clear mode bits
+    GPIOA->MODER  |=  ((2U << 4) | (2U << 6));  // Set AF mode (Binary 10)
+    
+    // Set AF7 (USART2) for Pin 2 and Pin 3 in Alternate Function Low Register
+    GPIOA->AFR[0] |=  ((7 << 8) | (7 << 12)); 
 
-    // Вказуємо, що Alternate Function - це саме AF7 (USART2)
-    // AFR[0] (Low register) відповідає за ніжки 0-7
-    GPIOA->AFR[0] |= (7 << (2 * 4)); // Для PA2
-    GPIOA->AFR[0] |= (7 << (3 * 4)); // Для PA3
+    // 3. Configure PA5 (LED) as Output
+    GPIOA->MODER &= ~(3U << 10);
+    GPIOA->MODER |=  (1U << 10);
 
-    // Налаштовуємо PA5 (LED) на режим Output (01)
-    GPIOA->MODER &= ~(3U << (5 * 2));
-    GPIOA->MODER |=  (1U << (5 * 2));
+    // 4. Configure USART2
+    // Baud Rate Calculation: 16 MHz / (16 * 115200) ~= 8.68 -> Mantissa=8, Fraction=11 -> 0x8B
+    USART2->BRR = 0x008B; 
+    
+    // Enable UART (UE), Transmitter (TE), Receiver (RE)
+    USART2->CR1 = (1 << 13) | (1 << 3) | (1 << 2);
 
-    // Налаштовуємо швидкість UART (115200 бод при 16 МГц)
-    USART2->BRR = 0x008B; // 139
+    // --- Main Loop ---
+    UART_SendString("\r\n--- STM32 UART Controller Ready ---\r\n");
 
-    // Вмикаємо UART: TE (Transmit), RE (Receive), UE (Module Enable)
-    USART2->CR1 = (1 << 3) | (1 << 2) | (1 << 13);
-
-    // --- ПРИВІТАННЯ ---
-    UART_SendString("\r\n--- SYSTEM STARTED ---\r\n");
-    UART_SendString("Type '1' to LED ON\r\n");
-    UART_SendString("Type '0' to LED OFF\r\n");
-
-    // --- 2. ГОЛОВНИЙ ЦИКЛ (LOOP) ---
     while(1) {
-        // Перевіряємо, чи прийшов байт (RXNE bit 5)
+        // Check RXNE (Read Data Register Not Empty)
         if (USART2->SR & (1 << 5)) {
-            char data = USART2->DR; // Читаємо байт
+            char cmd = USART2->DR; // Read received byte
 
-            if (data == '1') {
-                GPIOA->ODR |= (1 << 5); // Запалити LED
-                UART_SendString("LED IS ON!\r\n");
+            if (cmd == '1') {
+                GPIOA->ODR |= (1 << 5);  // LED ON
+                UART_SendString(" -> LED ON\r\n");
             }
-            else if (data == '0') {
-                GPIOA->ODR &= ~(1 << 5); // Погасити LED
-                UART_SendString("LED IS OFF!\r\n");
+            else if (cmd == '0') {
+                GPIOA->ODR &= ~(1 << 5); // LED OFF
+                UART_SendString(" -> LED OFF\r\n");
             }
         }
     }
